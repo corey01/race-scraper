@@ -12,13 +12,13 @@ const runScraper = async () => {
   // Open a new page
   const page = await browser.newPage();
 
-  const bsb2023 = await britishSuperBikes(page, "2023");
-  const bsb2024 = await britishSuperBikes(page, "2024");
+  // const bsb2023 = await britishSuperBikes(page, "2023");
+  // const bsb2024 = await britishSuperBikes(page, "2024");
 
   const sbk = await worldSuperbikes(page);
 
-  writeJson(bsb2023);
-  writeJson(bsb2024);
+  // writeJson(bsb2023);
+  // writeJson(bsb2024);
 };
 
 // Start the scraping
