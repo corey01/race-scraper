@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer";
 import { britishSuperBikes } from "./utils/bsb.js";
 import { writeJson } from "./utils/writeToJson.js";
+import { worldSuperbikes } from "./utils/worldsbk.js";
 
 const runScraper = async () => {
   const browser = await puppeteer.launch({
@@ -13,6 +14,8 @@ const runScraper = async () => {
 
   const bsb2023 = await britishSuperBikes(page, "2023");
   const bsb2024 = await britishSuperBikes(page, "2024");
+
+  const sbk = await worldSuperbikes(page);
 
   writeJson(bsb2023);
   writeJson(bsb2024);
