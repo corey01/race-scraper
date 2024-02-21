@@ -9,7 +9,7 @@ export const motogp = async (page) => {
   
       const formattedRoundDetails = [...events].map((round) => {
         const type = round.querySelector('.calendar-listing__status-type')?.innerText.trim();
-        const title = round.querySelector('.calendar-listing__title')?.innerText.trim();
+        const title = round.querySelector('.calendar-listing__title')?.innerText.trim().replace(/\n/g, " ");
         const trackName = round.querySelector('.calendar-listing__location-track-name')?.innerText.trim();
         const startDay = round.querySelector('.calendar-listing__date-start-day')?.innerText.trim();
         const startMonth = round.querySelector('.calendar-listing__date-start-month')?.innerText.trim();
@@ -79,8 +79,6 @@ export const motogp = async (page) => {
   
       detailedRounds.push(vals);
     }
-
-    console.log(detailedRounds)
   
     return {
       name: "MotoGP",
