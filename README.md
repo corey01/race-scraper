@@ -1,3 +1,3 @@
 # race-scraper
 
-Scraper to pull race data and export into JSON format to be consumed by app.
+Simple pureJS scraper that loops through BSB, WSBK and MotoGP calendar pages and collects the race data in JSON format to be consumed by my other app.
