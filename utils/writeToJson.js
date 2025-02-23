@@ -7,17 +7,23 @@ export const writeJson = async (dataToWrite) => {
   const stringifiedData = JSON.stringify(data);
 
   const safeName = name.replace(/[^A-Z0-9]+/gi, "_");
-
+  
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   const filePath = path.join(__dirname, `../output/${safeName}`);
-
+  
   await fs.promises.mkdir(filePath, {
     recursive: true,
   });
+  
+  console.log('writing', `${filePath}/${safeName}-${year}.json`);
 
-  await fs.writeFileSync(
+  fs.writeFileSync(
     `${filePath}/${safeName}-${year}.json`,
     stringifiedData
   );
+
+  console.log('file written');
+
+  Promise.resolve();
 };
