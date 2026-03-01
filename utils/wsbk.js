@@ -1,5 +1,4 @@
 export const wsbk = async (page) => {
-  console.log("Starting WSBK");
   await page.goto(`https://www.worldsbk.com/en/calendar`, {
     waitUntil: "domcontentloaded",
   });
@@ -121,9 +120,11 @@ export const wsbk = async (page) => {
 
   console.log("Done WSBK, length: ", detailedRounds);
 
+  const year =  new Date().getFullYear();
+
   return {
     name: "WorldSBK",
-    year: 2025,
+    year,
     data: detailedRounds,
   };
 };

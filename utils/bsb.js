@@ -11,12 +11,19 @@ const SEL_TIMEOUT = 20_000;
 const MAX_CONCURRENCY = 4; // be polite
 const ROOT = "https://www.britishsuperbike.com";
 
-const timeRx = /\b([01]?\d|2[0-3]):[0-5]\d\b/; // 0:00-23:59
-const dayRx = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/i;
+const timeRx = /\b([01]?\d|2[0-3]):[0-5]\d\b/; // permissive: 0:00-23:59
+const strictTimeRx = /\b([01]\d|2[0-3]):[0-5]\d\b/; // strict: 00:00-23:59
+const dayRx = /\b(Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs(?:day)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\b/i;
 const noiseRx = /\b(Live\s*Video|Video|Results?)\b/gi;
 
 function clean(s = "") {
   return s.replace(/\s+/g, " ").replace(noiseRx, "").trim();
+}
+
+function parseDayMonthYear(day, month, year, zone) {
+  const dtAbbrev = DateTime.fromFormat(`${day} ${month} ${year}`, "d LLL yyyy", { zone });
+  if (dtAbbrev.isValid) return dtAbbrev;
+  return DateTime.fromFormat(`${day} ${month} ${year}`, "d LLLL yyyy", { zone });
 }
 
 function determineType(name = "") {
@@ -64,16 +71,16 @@ function expandDateSpan(spanText, year, defaultZone) {
   let start, end;
   if (mCross) {
     const [, d1, mon1, d2, mon2] = mCross;
-    start = DateTime.fromFormat(`${d1} ${mon1} ${year}`, "d LLL yyyy", { zone: defaultZone });
-    end   = DateTime.fromFormat(`${d2} ${mon2} ${year}`, "d LLL yyyy", { zone: defaultZone });
+    start = parseDayMonthYear(d1, mon1, year, defaultZone);
+    end   = parseDayMonthYear(d2, mon2, year, defaultZone);
   } else if (m) {
     const [, d1, d2, mon] = m;
-    start = DateTime.fromFormat(`${d1} ${mon} ${year}`, "d LLL yyyy", { zone: defaultZone });
-    end   = DateTime.fromFormat(`${d2} ${mon} ${year}`, "d LLL yyyy", { zone: defaultZone });
+    start = parseDayMonthYear(d1, mon, year, defaultZone);
+    end   = parseDayMonthYear(d2, mon, year, defaultZone);
   } else {
     const s = txt.match(/(\d{1,2})\s+([A-Za-z]+)/);
     if (s) {
-      start = DateTime.fromFormat(`${s[1]} ${s[2]} ${year}`, "d LLL yyyy", { zone: defaultZone });
+      start = parseDayMonthYear(s[1], s[2], year, defaultZone);
       end   = start;
     } else return [];
   }
@@ -91,6 +98,13 @@ function inferTimezone(circuitText = "") {
   return "Europe/London";
 }
 
+function normalizeDay(dayText = "") {
+  const m = dayText.match(dayRx);
+  if (!m) return null;
+  const token = m[1].slice(0, 3).toLowerCase();
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
 function resolveEventDateISO({ day, time }, round) {
   if (!day || !time || !round?.date || !round?.year) return { iso: null, zone: null };
 
@@ -98,7 +112,11 @@ function resolveEventDateISO({ day, time }, round) {
   const days = expandDateSpan(round.date, round.year, zone);
   if (!days.length) return { iso: null, zone };
 
-  const targetDow = DateTime.fromFormat(day, "ccc", { zone }).weekday; // 1=Mon..7=Sun
+  const normalizedDay = normalizeDay(day);
+  if (!normalizedDay) return { iso: null, zone };
+
+  const targetDow = DateTime.fromFormat(normalizedDay, "ccc", { zone }).weekday; // 1=Mon..7=Sun
+  if (!targetDow) return { iso: null, zone };
   const match = days.find(d => d.weekday === targetDow);
   if (!match) return { iso: null, zone };
 
@@ -176,12 +194,14 @@ async function scrapeEvent(page, round) {
   await waitForVisible(page, "body");
 
   // Extract timetable (day / name / time)
-  const rawEvents = await page.evaluate(({ timeRxSource, dayRxSource }) => {
+  const rawEvents = await page.evaluate(({ timeRxSource, strictTimeRxSource, dayRxSource }) => {
     const timeRx = new RegExp(timeRxSource);
+    const strictTimeRx = new RegExp(strictTimeRxSource);
     const dayRx  = new RegExp(dayRxSource, "i");
     const pageEvents = [];
 
     // A) Structured lists/tables first
+    const hasScheduleContainer = Boolean(document.querySelector(".event-schedule, .schedule, .timetable"));
     const structured = Array.from(document.querySelectorAll(
       '.event-schedule .event, .event-schedule li, .schedule li, .schedule .row, .timetable li, .timetable .row'
     ));
@@ -190,7 +210,10 @@ async function scrapeEvent(page, round) {
         const txts = Array.from(el.querySelectorAll('*')).map(n => (n.textContent || "").trim()).filter(Boolean);
         const time = (txts.join(" ").match(timeRx) || [])[0] || null;
         let day = null;
-        for (const t of txts) { if (dayRx.test(t)) { day = t; break; } }
+        for (const t of txts) {
+          const m = t.match(dayRx);
+          if (m) { day = m[1]; break; }
+        }
         // Only use the first non-day/non-time text as the name
         const name = txts.find(t => !dayRx.test(t) && !timeRx.test(t)) || "";
         if (time && name) pageEvents.push({ day, name: name.trim(), time });
@@ -198,21 +221,28 @@ async function scrapeEvent(page, round) {
     }
 
     // B) Heuristic fallback
-    if (!pageEvents.length) {
+    if (!pageEvents.length && !hasScheduleContainer) {
       const nodes = Array.from(document.querySelectorAll('body *'))
         .filter(el => !el.children.length && (el.textContent || '').trim());
       for (let i = 0; i < nodes.length; i++) {
         const t = (nodes[i].textContent || "").trim();
-        if (!timeRx.test(t)) continue;
-        const time = (t.match(timeRx) || [])[0];
+        if (!strictTimeRx.test(t)) continue;
+        const time = (t.match(strictTimeRx) || [])[0];
         const win = nodes.slice(Math.max(0, i - 4), Math.min(nodes.length, i + 6));
         let day = null;
         for (const n of win) {
           const s = (n.textContent || "").trim();
-          if (dayRx.test(s)) { day = s; break; }
+          const m = s.match(dayRx);
+          if (m) { day = m[1]; break; }
         }
+        if (!day) continue;
         const near = win.map(n => (n.textContent || "").trim()).join(" ").replace(/\s+/g, " ");
-        const name = near.replace(new RegExp(timeRx.source, "g"), "").replace(new RegExp(dayRx.source, "ig"), "").replace(/\s+/g, " ").trim();
+        if (/\b(lap record|mph|pole position)\b/i.test(near)) continue;
+        const name = near
+          .replace(new RegExp(strictTimeRx.source, "g"), "")
+          .replace(new RegExp(dayRx.source, "ig"), "")
+          .replace(/\s+/g, " ")
+          .trim();
         if (time && name && name.length <= 150) pageEvents.push({ day, name, time });
       }
     }
@@ -231,7 +261,7 @@ async function scrapeEvent(page, round) {
       }
     }
     return out;
-  }, { timeRxSource: timeRx.source, dayRxSource: dayRx.source });
+  }, { timeRxSource: timeRx.source, strictTimeRxSource: strictTimeRx.source, dayRxSource: dayRx.source });
 
   // Title/circuit/layout (best-effort)
   const meta = await page.evaluate(() => {
